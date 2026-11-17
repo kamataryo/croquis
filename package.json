@@ -1,0 +1,13 @@
+{
+  "name": "claude-croquis",
+  "private": true,
+  "type": "module",
+  "bin": { "croquis": "bin/croquis" },
+  "scripts": {
+    "dev": "vite",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

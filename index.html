@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>croquis</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px system-ui, sans-serif; color-scheme: light dark; }
+      #tabs, #tools, #fb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; }
+      #tabs button[aria-pressed='true'] { font-weight: bold; border-bottom: 3px solid #e03131; }
+      fieldset { display: flex; gap: 8px; margin: 0; padding: 2px 8px; border: 1px solid #8884; border-radius: 6px; }
+      /* 図は白地の前提で描かれるので、ダークモードでも白のまま */
+      #stage { flex: 1; min-height: 0; position: relative; background: #fff; touch-action: none; cursor: crosshair; }
+      #stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+      #comment { flex: 1; min-width: 200px; padding: 6px; }
+    </style>
+  </head>
+  <body>
+    <nav id="tabs" aria-label="クロッキー一覧"></nav>
+    <form id="tools">
+      <fieldset>
+        <legend>ツール</legend>
+        <label><input type="radio" name="tool" value="path" checked />ペン</label>
+        <label><input type="radio" name="tool" value="ellipse" />楕円</label>
+      </fieldset>
+      <fieldset>
+        <legend>色</legend>
+        <label><input type="radio" name="color" value="red" checked />赤</label>
+        <label><input type="radio" name="color" value="blue" />青</label>
+        <label><input type="radio" name="color" value="green" />緑</label>
+        <label><input type="radio" name="color" value="black" />黒</label>
+      </fieldset>
+      <fieldset>
+        <legend>線種</legend>
+        <label><input type="radio" name="dash" value="solid" checked />実線</label>
+        <label><input type="radio" name="dash" value="dashed" />破線</label>
+        <label><input type="radio" name="dash" value="dotted" />点線</label>
+      </fieldset>
+      <fieldset>
+        <legend>太さ</legend>
+        <label><input type="radio" name="width" value="3" checked />細</label>
+        <label><input type="radio" name="width" value="7" />太</label>
+      </fieldset>
+      <button type="button" id="undo">元に戻す</button>
+      <button type="button" id="clear-all">全消去</button>
+    </form>
+    <main id="stage"></main>
+    <form id="fb">
+      <input id="comment" placeholder="コメント" aria-label="コメント" autocomplete="off" />
+      <label><input type="checkbox" id="clear-after" checked />送信後に赤ペンを消す</label>
+      <button>送る</button>
+      <output id="msg"></output>
+    </form>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
