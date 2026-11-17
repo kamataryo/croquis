@@ -19,7 +19,8 @@ if (!['open', 'wait'].includes(cmd) || !/^\d*$/.test(n)) {
 }
 
 if (cmd === 'wait') {
-  const get = (p) => fetch(`${BASE}/api/${p}`).then((r) => r.json())
+  // ヘッダーを付けて、待っていることをサーバーに知らせる（ビューアに表示される）
+  const get = (p) => fetch(`${BASE}/api/${p}`, { headers: { 'X-Croquis-Wait': '1' } }).then((r) => r.json())
   for (;;) {
     let fbs
     try {

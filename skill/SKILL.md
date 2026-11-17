@@ -27,9 +27,10 @@ API が応答しない（connection refused）ときは、先に `croquis open` 
 
 ## SVG の書き方
 
-- ルートの `<svg>` に `viewBox` を付ける。背景は白の前提
+- ルートの `<svg>` に `viewBox` を付ける。背景は白の前提（ダークモードではビューアが明るさを反転して表示するので、白地のつもりで描けばよい）
 - **主要な要素（ラベル、箱、矢印など）には必ず `id` を付ける**。フィードバックの `targets` はこの id で返ってくる
 - `<script>`、`<foreignObject>`、イベント属性は表示のときに取り除かれるので使わない
+- **原色の赤 `#ff0000`・青 `#0000ff`・緑 `#00ff00`・黄 `#ffff00` と、それに近い鮮やかな色は使わない**。ユーザーの赤ペンの色なので、図と印の見分けがつかなくなる。図には彩度を落とした色（例：`#c2410c`、`#1e40af`、`#15803d`、`#a16207`）と、その淡い塗りを使う
 
 ## 修正する
 
@@ -48,12 +49,14 @@ API が応答しない（connection refused）ときは、先に `croquis open` 
    ```sh
    curl -s http://127.0.0.1:5199/api/croquis/3/feedback
    ```
+   - ユーザーは複数のフィードバックをためて一度に送れる。配列に複数入っていることも、複数のクロッキーにまたがることもある（`croquis wait` の出力には全クロッキーの分が入る）。全部を読んでから直す
+   - `croquis`：対象のクロッキーの id
    - `comment`：ユーザーのコメント
-   - `marks[]`：印ごとの `color`、`dash`、`bbox`（図の座標系で `[x, y, 幅, 高さ]`）、`targets`（囲まれた要素の id）
+   - `marks[]`：印ごとの `type`（`path`・`ellipse`・`rect`・`text`）、`text`（`type` が `text` のときの、ユーザーが図の上に書いた文字）、`color`、`dash`、`bbox`（図の座標系で `[x, y, 幅, 高さ]`）、`targets`（囲まれた要素の id）
    - `snapshotPath`：図と赤ペンを重ねた PNG
 3. `snapshotPath` の PNG を Read して、見た目を確かめる
 4. `drawing.svg` を修正する
-5. 既読にする
+5. 既読にする（フィードバックが届いたクロッキーごとに）
    ```sh
    curl -s -X DELETE http://127.0.0.1:5199/api/croquis/3/feedback
    ```
@@ -64,10 +67,16 @@ API が応答しない（connection refused）ときは、先に `croquis open` 
 - 赤の実線：直してほしい
 - 青の破線：ここを参考に、ここと揃えて
 - 緑：OK、このまま残して
+- 黄：決まった意味はない。コメントを読む
+- 矢印（`dash` が `arrow`）：ここからここへ（動かす、つなぐ）。向きは JSON に入らないので、PNG で確かめる
+
+## ユーザーが足した空のクロッキー
+
+ユーザーはビューアの「+」で空のクロッキーを足して、そこに下絵を描いて送ってくることがある。`drawing.svg` はまだないので、`GET /api/croquis/{n}` の `drawingPath` に Write する。
 
 ## そのほかの API
 
-- `GET /api/status`：ビューアの状態 `{open, visible, clients}`
+- `GET /api/status`：ビューアの状態 `{open, visible, clients, waiting, processing}`（`waiting` は `croquis wait` が待っている間、`processing` は `croquis wait` がフィードバックを受け取ってから既読にするまで true。ビューアに「待機中」「処理中」と表示されるので、対応が済んだら必ず既読にする）
 - `GET /api/croquis`：一覧
 - `GET /api/croquis/{n}`：取得
 - `PUT /api/croquis/{n}`：`{title, drawing}` で更新

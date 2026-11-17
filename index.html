@@ -5,52 +5,95 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>croquis</title>
     <style>
+      :root {
+        color-scheme: light dark;
+        --bar: light-dark(#eef0f2, #1b1c1f);
+        --bg: light-dark(#fff, #2a2c30);
+        --line: light-dark(#c9cdd2, #4a4d53);
+        --on: light-dark(#dbe4ff, #3b4a8a);
+      }
       * { box-sizing: border-box; }
-      body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px system-ui, sans-serif; color-scheme: light dark; }
-      #tabs, #tools, #fb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; }
-      #tabs button[aria-pressed='true'] { font-weight: bold; border-bottom: 3px solid #e03131; }
-      fieldset { display: flex; gap: 8px; margin: 0; padding: 2px 8px; border: 1px solid #8884; border-radius: 6px; }
-      /* 図は白地の前提で描かれるので、ダークモードでも白のまま */
-      #stage { flex: 1; min-height: 0; position: relative; background: #fff; touch-action: none; cursor: crosshair; }
+      body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px system-ui, sans-serif; background: var(--bar); }
+      button, input { font: inherit; }
+
+      /* タブ：下の線は inset の影で引き、選択中のタブが自分の下辺で塗りつぶす */
+      #tabs { display: flex; gap: 2px; padding: 6px 10px 0; overflow-x: auto; box-shadow: inset 0 -1px var(--line); }
+      .tab { display: flex; flex: none; align-items: center; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 8px 8px 0 0; }
+      .tab:hover { background: var(--bg); }
+      .tab:has([aria-pressed='true']) { background: var(--bg); border-color: var(--line); border-bottom-color: var(--bg); font-weight: bold; }
+      #tabs > button { border: 0; background: none; color: inherit; cursor: pointer; padding: 4px 10px; font-size: 18px; }
+      .tab button { border: 0; background: none; color: inherit; cursor: pointer; padding: 6px 4px 6px 12px; }
+      .tab button:first-child { max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tab button:last-child { padding: 2px 6px; margin-right: 4px; border-radius: 50%; opacity: 0.6; }
+      .tab button:last-child:hover { opacity: 1; background: var(--line); }
+
+      #tools, #fb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; background: var(--bg); }
+      .seg { display: flex; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+      .seg label, .pop label { display: flex; align-items: center; padding: 4px 8px; cursor: pointer; }
+      /* ラジオ本体は隠すが、キーボードで選べるようにフォーカスは残す */
+      .seg input, .pop input { position: absolute; opacity: 0; pointer-events: none; }
+      .seg label:has(:checked), .pop label:has(:checked) { background: var(--on); }
+      .seg label:has(:focus-visible), .pop label:has(:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+
+      /* ドロップダウン：popover をボタンの下に出す */
+      #tools button, #fb button { display: flex; align-items: center; gap: 6px; }
+      .pop { margin: 0; inset: auto; position-area: bottom span-right; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; }
+      .pop:popover-open { display: grid; gap: 2px; }
+      #m-color:popover-open { display: flex; }
+      .pop label { padding: 6px; border-radius: 6px; }
+      .pv { display: flex; align-items: center; gap: 4px; }
+      .sw { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); }
+
+      /* 図は白地の前提で描かれる。ダークモードでは図のレイヤーだけ明るさを反転して（色相は保つ）、黒地に明るい文字にする。
+         赤ペンのレイヤーは反転しないので、選んだ色のまま出る。Claude に送る PNG は白地のまま */
+      @media (prefers-color-scheme: dark) {
+        #stage > svg:first-child { filter: invert(1) hue-rotate(180deg); }
+      }
+      #stage { flex: 1; min-height: 0; position: relative; background: light-dark(#fff, #000); border-block: 1px solid var(--line); touch-action: none; cursor: crosshair; }
       #stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .text-entry { position: absolute; z-index: 1; transform: translateY(-50%); margin-left: -3px; padding: 0 2px; min-width: 8em; font-family: sans-serif; font-weight: bold; background: none; border: 1px dashed currentColor; }
+
+      #queue { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; padding: 0; list-style: none; }
+      #queue:empty { display: none; }
+      #queue::before { content: '送信待ち ' attr(data-n) ' 件'; font-weight: bold; }
+      #queue li { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--on); }
+      #queue img { height: 28px; background: #fff; border-radius: 3px; }
+      #queue span { max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #queue button { border: 0; background: none; color: inherit; cursor: pointer; }
+      #wait::before { content: '●'; margin-right: 4px; color: var(--line); }
+      #wait[data-state='waiting']::before { color: #2f9e44; }
+      #wait[data-state='processing']::before { color: #f59f00; }
       #comment { flex: 1; min-width: 200px; padding: 6px; }
     </style>
   </head>
   <body>
     <nav id="tabs" aria-label="クロッキー一覧"></nav>
     <form id="tools">
-      <fieldset>
-        <legend>ツール</legend>
-        <label><input type="radio" name="tool" value="path" checked />ペン</label>
-        <label><input type="radio" name="tool" value="ellipse" />楕円</label>
+      <fieldset class="seg" aria-label="ツール">
+        <label title="ペン"><input type="radio" name="tool" value="path" aria-label="ペン" checked /><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 17l1-4L14 3l3 3L7 16z M12 5l3 3"/></svg></label>
+        <label title="楕円"><input type="radio" name="tool" value="ellipse" aria-label="楕円" /><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><ellipse cx="10" cy="10" rx="7.5" ry="5.5"/></svg></label>
+        <label title="四角"><input type="radio" name="tool" value="rect" aria-label="四角" /><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="4.5" width="14" height="11" rx="1"/></svg></label>
+        <label title="テキスト"><input type="radio" name="tool" value="text" aria-label="テキスト" /><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 6V4h12v2M10 4v12M8 16h4"/></svg></label>
       </fieldset>
-      <fieldset>
-        <legend>色</legend>
-        <label><input type="radio" name="color" value="red" checked />赤</label>
-        <label><input type="radio" name="color" value="blue" />青</label>
-        <label><input type="radio" name="color" value="green" />緑</label>
-        <label><input type="radio" name="color" value="black" />黒</label>
-      </fieldset>
-      <fieldset>
-        <legend>線種</legend>
-        <label><input type="radio" name="dash" value="solid" checked />実線</label>
-        <label><input type="radio" name="dash" value="dashed" />破線</label>
-        <label><input type="radio" name="dash" value="dotted" />点線</label>
-      </fieldset>
-      <fieldset>
-        <legend>太さ</legend>
-        <label><input type="radio" name="width" value="3" checked />細</label>
-        <label><input type="radio" name="width" value="7" />太</label>
-      </fieldset>
-      <button type="button" id="undo">元に戻す</button>
+      <!-- 中身（選択肢のラジオ）は main.ts が作る -->
+      <button type="button" popovertarget="m-color" aria-label="色" title="色"><span class="pv"></span></button>
+      <div id="m-color" class="pop" popover></div>
+      <button type="button" popovertarget="m-dash">線種 <span class="pv"></span></button>
+      <div id="m-dash" class="pop" popover></div>
+      <button type="button" popovertarget="m-width" aria-label="太さ" title="太さ"><span class="pv"></span></button>
+      <div id="m-width" class="pop" popover></div>
+      <button type="button" id="undo" aria-label="元に戻す" title="元に戻す"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4L4 8l4 4M4 8h8a4.5 4.5 0 0 1 0 9H9"/></svg></button>
       <button type="button" id="clear-all">全消去</button>
     </form>
     <main id="stage"></main>
     <form id="fb">
+      <ol id="queue" aria-label="送信待ちのフィードバック"></ol>
       <input id="comment" placeholder="コメント" aria-label="コメント" autocomplete="off" />
-      <label><input type="checkbox" id="clear-after" checked />送信後に赤ペンを消す</label>
-      <button>送る</button>
+      <label><input type="checkbox" id="clear-after" checked />追加・送信後に赤ペンを消す</label>
+      <button type="button" id="enqueue">キューに追加</button>
+      <button id="send" aria-label="送る" title="送る"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2L2 9l6 3 3 6zM18 2L8 12"/></svg></button>
       <output id="msg"></output>
+      <span id="wait" role="status"></span>
     </form>
     <script type="module" src="/src/main.ts"></script>
   </body>

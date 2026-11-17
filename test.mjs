@@ -31,7 +31,10 @@ try {
   assert.equal((await call('GET', 'active'))[1].id, id)
   assert.equal((await call('PUT', 'active', { id: 999 }))[0], 404)
 
-  assert.deepEqual((await call('GET', 'status'))[1], { open: false, visible: false, clients: 0 })
+  assert.deepEqual((await call('GET', 'status'))[1], { open: false, visible: false, clients: 0, waiting: false, processing: false })
+  // croquis wait はヘッダーを付けて聞きに来る。それで「待っている」になる
+  await call('GET', 'croquis', undefined, { 'X-Croquis-Wait': '1' })
+  assert.equal((await call('GET', 'status'))[1].waiting, true)
 
   // フィードバックはブラウザが ws で書く。ここではファイルを置いて、読み出しと既読を確かめる
   const fdir = path.join(process.env.CROQUIS_DIR, String(id), 'feedback')
@@ -41,6 +44,21 @@ try {
   assert.equal(fbs[0].snapshotPath, path.join(fdir, 'fb-1.png'))
   await call('DELETE', `croquis/${id}/feedback`)
   assert.deepEqual((await call('GET', `croquis/${id}/feedback`))[1], [])
+
+  // まとめて送ったフィードバックが、1 通で全部書かれる（ブラウザの代わりに Vite の ws へ直接送る）
+  const ws = new WebSocket(`ws://127.0.0.1:5198/?token=${server.config.webSocketToken}`, 'vite-hmr')
+  await new Promise((ok, ng) => Object.assign(ws, { onopen: ok, onerror: ng }))
+  const saved = new Promise((ok) => (ws.onmessage = (e) => JSON.parse(e.data).event === 'croquis:saved' && ok(JSON.parse(e.data).data)))
+  const items = [{ croquis: id, comment: 'a', marks: [] }, { croquis: id, comment: 'b', marks: [] }, { croquis: 999, comment: 'x' }]
+  ws.send(JSON.stringify({ type: 'custom', event: 'croquis:feedback', data: { items } }))
+  assert.equal((await saved).ids.length, 2)
+  ws.close()
+  assert.deepEqual((await call('GET', `croquis/${id}/feedback`))[1].map((f) => f.comment), ['a', 'b'])
+  // croquis wait が受け取ってから既読にするまでは「処理中」
+  await call('GET', `croquis/${id}/feedback`, undefined, { 'X-Croquis-Wait': '1' })
+  assert.deepEqual([(await call('GET', 'status'))[1]].map((s) => [s.waiting, s.processing]), [[false, true]])
+  await call('DELETE', `croquis/${id}/feedback`)
+  assert.equal((await call('GET', 'status'))[1].processing, false)
 
   // 守り：ほかのサイトからの呼び出し、数字でない id、壊れた JSON
   assert.equal((await call('POST', 'croquis', {}, { Origin: 'https://evil.example' }))[0], 403)

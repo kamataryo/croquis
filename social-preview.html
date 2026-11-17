@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+  GitHub のソーシャル画像（1280×640）。書き出し：
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars \
+    --force-device-scale-factor=1 --window-size=1280,640 --screenshot=social-preview.png social-preview.html
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>croquis social preview</title>
+    <style>
+      html, body { margin: 0; background: #f1efe9; }
+      svg { display: block; }
+    </style>
+  </head>
+  <body>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" font-family="system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0L10,5L0,10z" fill="#333"/>
+    </marker>
+    <marker id="ah-pen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M1,1L9,5L1,9" fill="none" stroke="#c2410c" stroke-width="1.6" stroke-linecap="round"/>
+    </marker>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="12" cy="12" r="1.3" fill="#d5d8dc"/>
+    </pattern>
+    <clipPath id="canvas-clip"><rect x="600" y="90" width="620" height="460" rx="14"/></clipPath>
+  </defs>
+
+  <rect id="frame" width="1280" height="640" fill="#f1efe9"/>
+
+  <text id="title" x="104" y="358" font-size="112" font-weight="bold" fill="#222">croquis</text>
+
+  <!-- キャンバス：ビューアの窓に見立てる（タブ、道具、点の方眼） -->
+  <g id="canvas">
+    <rect id="canvas-shadow" x="608" y="100" width="620" height="460" rx="14" fill="#d9d5cb"/>
+    <g clip-path="url(#canvas-clip)">
+      <rect id="canvas-paper" x="600" y="90" width="620" height="460" fill="#fff"/>
+      <rect id="canvas-grid" x="600" y="174" width="620" height="376" fill="url(#dots)"/>
+      <rect id="canvas-tabbar" x="600" y="90" width="620" height="44" fill="#e4e1d9"/>
+      <path id="canvas-tab" d="M618,134V108a8,8 0 0 1 8,-8h124a8,8 0 0 1 8,8V134z" fill="#fff"/>
+      <rect id="canvas-tab-label" x="634" y="113" width="84" height="8" rx="4" fill="#9a968c"/>
+      <rect id="canvas-tab-2" x="776" y="113" width="64" height="8" rx="4" fill="#bdb9af"/>
+      <g id="canvas-tools" fill="none" stroke="#555" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect id="tool-active" x="620" y="141" width="30" height="26" rx="5" fill="#e8eefc" stroke="none"/>
+        <path id="tool-pen" d="M628,162l2,-7l11,-11l5,5l-11,11z"/>
+        <ellipse id="tool-ellipse" cx="675" cy="154" rx="11" ry="8"/>
+        <rect id="tool-rect" x="700" y="146" width="22" height="16" rx="2"/>
+        <circle id="tool-color" cx="752" cy="154" r="8" fill="#c2410c" stroke="none"/>
+      </g>
+      <path id="canvas-toolbar-line" d="M600,174H1220" stroke="#d5d8dc" stroke-width="1.5"/>
+    </g>
+    <rect id="canvas-border" x="600" y="90" width="620" height="460" rx="14" fill="none" stroke="#333" stroke-width="2.5"/>
+  </g>
+
+  <g id="diagram" font-size="26" fill="#222" text-anchor="middle">
+    <rect id="box-in" x="640" y="222" width="160" height="76" rx="10" fill="#fff" stroke="#333" stroke-width="2.5"/>
+    <text id="label-in" x="720" y="269">Input</text>
+    <rect id="box-proc" x="900" y="222" width="160" height="76" rx="10" fill="#fff" stroke="#333" stroke-width="2.5"/>
+    <text id="label-proc" x="980" y="269">Process</text>
+    <rect id="box-out" x="770" y="420" width="160" height="76" rx="10" fill="#fff" stroke="#333" stroke-width="2.5"/>
+    <text id="label-out" x="850" y="467">Output</text>
+    <path id="arrow-1" d="M800,260H896" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
+    <path id="arrow-2" d="M980,298L880,416" stroke="#333" stroke-width="3" marker-end="url(#ah)"/>
+  </g>
+
+  <g id="pen" fill="none" stroke="#c2410c" stroke-width="6" stroke-linecap="round">
+    <path id="pen-circle" d="M872,264C866,202 990,184 1062,206C1118,224 1100,312 1024,322C952,332 874,316 876,252"/>
+    <path id="pen-arrow" d="M1084,384C1074,362 1064,346 1054,332" marker-end="url(#ah-pen)"/>
+    <text id="pen-note" x="1058" y="432" font-size="44" font-weight="bold" fill="#c2410c" stroke="none">OK</text>
+  </g>
+</svg>
+  </body>
+</html>

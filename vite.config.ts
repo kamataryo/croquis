@@ -25,6 +25,9 @@ function croquis(): Plugin {
         return state
       }
 
+      let delivered = false // croquis wait にフィードバックを渡してから、既読になるまで（＝エージェントが処理している間）true
+      let lastWait = 0 // croquis wait が最後に聞きに来た時刻。1 秒おきに来るので、途絶えたら待っていないとみなす
+
       // ---- ブラウザ → サーバー（Vite の ws custom event）----
       const clients = new Map<any, boolean>() // socket → 表示中か
       server.ws.on('croquis:visibility', ({ visible }, client) => {
@@ -38,18 +41,22 @@ function croquis(): Plugin {
       server.ws.on('croquis:sketch', ({ id, svg }) => {
         if (exists(id)) fs.writeFileSync(path.join(dir(id), 'sketch.svg'), String(svg))
       })
-      server.ws.on('croquis:feedback', ({ croquis: id, comment, marks, png }, client) => {
-        if (!exists(id)) return
+      server.ws.on('croquis:feedback', ({ items }, client) => {
         const d = new Date()
         const p = (n: number) => String(n).padStart(2, '0')
-        const fbId = `fb-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
-        const fdir = path.join(dir(id), 'feedback')
-        fs.mkdirSync(fdir, { recursive: true })
-        fs.writeFileSync(path.join(fdir, `${fbId}.png`), Buffer.from(String(png).split(',')[1] ?? '', 'base64'))
-        writeJson(path.join(fdir, `${fbId}.json`), {
-          id: fbId, croquis: Number(id), comment: String(comment ?? ''), marks, snapshot: `feedback/${fbId}.png`,
+        const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+        // 1 通の分は同期で書ききる。途中で API が読むと、croquis wait が一部だけを受け取ってしまう
+        const saved = (Array.isArray(items) ? items : []).filter((it) => exists(it?.croquis)).map(({ croquis: id, comment, marks, png }, i) => {
+          const fbId = `fb-${stamp}-${p(i + 1)}`
+          const fdir = path.join(dir(id), 'feedback')
+          fs.mkdirSync(fdir, { recursive: true })
+          fs.writeFileSync(path.join(fdir, `${fbId}.png`), Buffer.from(String(png).split(',')[1] ?? '', 'base64'))
+          writeJson(path.join(fdir, `${fbId}.json`), {
+            id: fbId, croquis: Number(id), comment: String(comment ?? ''), marks, snapshot: `feedback/${fbId}.png`,
+          })
+          return fbId
         })
-        client.send('croquis:saved', { id: fbId })
+        client.send('croquis:saved', { ids: saved })
       })
 
       // ---- サーバー → ブラウザ ----
@@ -71,6 +78,8 @@ function croquis(): Plugin {
           const origin = req.headers.origin
           if (origin && origin !== `http://${req.headers.host}`) return send(403, { error: 'forbidden origin' })
 
+          if (req.headers['x-croquis-wait']) lastWait = Date.now()
+
           const seg = new URL(req.url ?? '/', 'http://x').pathname.split('/').filter(Boolean)
           const m = req.method
           const body = async () => {
@@ -82,7 +91,7 @@ function croquis(): Plugin {
 
           if (seg[0] === 'status' && m === 'GET') {
             const v = [...clients.values()]
-            return send(200, { open: v.length > 0, visible: v.some(Boolean), clients: v.length })
+            return send(200, { open: v.length > 0, visible: v.some(Boolean), clients: v.length, waiting: !delivered && Date.now() - lastWait < 3000, processing: delivered })
           }
 
           if (seg[0] === 'active' && seg.length === 1) {
@@ -129,6 +138,7 @@ function croquis(): Plugin {
               }
               if (m === 'DELETE') {
                 fs.rmSync(dir(id), { recursive: true })
+                delivered = false
                 if (readJson(stateFile, {}).id === Number(id)) fs.rmSync(stateFile)
                 return send(200, { id: Number(id) })
               }
@@ -138,6 +148,7 @@ function croquis(): Plugin {
               const fdir = path.join(dir(id), 'feedback')
               if (m === 'GET') {
                 const files = fs.existsSync(fdir) ? fs.readdirSync(fdir).filter((f) => f.endsWith('.json')).sort() : []
+                if (files.length && req.headers['x-croquis-wait']) delivered = true
                 return send(200, files.map((f) => {
                   const fb = readJson(path.join(fdir, f), {})
                   return { ...fb, snapshotPath: path.join(dir(id), fb.snapshot ?? '') }
@@ -146,6 +157,7 @@ function croquis(): Plugin {
               if (m === 'DELETE') {
                 // 既読 = 削除。履歴が要るようになったら feedback/read/ へ移す形に変える
                 fs.rmSync(fdir, { recursive: true, force: true })
+                delivered = false
                 return send(200, { id: Number(id) })
               }
             }
