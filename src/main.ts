@@ -28,10 +28,26 @@ function parseSvg(src: string | null): SVGSVGElement | null {
   return document.importNode(svg, true) as unknown as SVGSVGElement
 }
 
-async function show(id: number | null | undefined) {
-  const c = await api('croquis/' + id)
-  if (!c) return
-  const same = id === current
+// 1 タブ = 1 クロッキー。どれを表示するかは URL の # で決まり、タブの中では切り替えない
+const ID = Number(location.hash.slice(1)) || null
+let source: string | null = null // 表示している drawing.svg の中身
+let title = 'croquis'
+let unseen = false // タブが裏にある間に図が変わった
+const retitle = () => (document.title = (unseen ? '● ' : '') + title)
+
+async function show() {
+  const c = ID == null ? null : await api('croquis/' + ID)
+  if (!c) {
+    // 消されたか、はじめから無い
+    current = null
+    const p = document.createElement('p')
+    p.textContent = ID == null ? 'クロッキーがありません' : `クロッキー ${ID} はありません（削除されました）。このタブは閉じてください`
+    stage.replaceChildren(p)
+    title = 'croquis'
+    retitle()
+    return syncButtons()
+  }
+  const same = current != null
   const d = parseSvg(c.drawing)
   if (!d && same) return // 書きかけで壊れている間は、前の表示のままにする
   drawing = d ?? document.createElementNS(NS, 'svg')
@@ -40,70 +56,28 @@ async function show(id: number | null | undefined) {
   drawing.removeAttribute('width')
   drawing.removeAttribute('height')
 
-  // 赤ペンは図と同じ viewBox で重ねる。同じクロッキーの更新なら、描きかけを残す
+  // 赤ペンは図と同じ viewBox で重ねる。更新のときは、描きかけを残す
   const kept = same && sketch ? [...sketch.children] : [...(parseSvg(c.sketch)?.children ?? [])]
   sketch = document.createElementNS(NS, 'svg')
   sketch.setAttribute('viewBox', drawing.getAttribute('viewBox')!)
   sketch.append(...kept)
   stage.replaceChildren(drawing, sketch)
 
+  // 裏にある間に図が変わったら、タブの名前に印を付ける（CLI からは、開いているタブを前に出せないので）
+  if (same && c.drawing !== source && document.hidden) unseen = true
+  source = c.drawing
   current = c.id
-  history.replaceState(null, '', '#' + c.id)
-  renderTabs()
+  title = `${c.id}: ${c.meta.title ?? ''}`
+  retitle()
   syncButtons()
 }
 
-async function renderTabs() {
-  const list: { id: number; title?: string }[] = (await api('croquis')) ?? []
-  const add = document.createElement('button')
-  add.textContent = '+'
-  add.ariaLabel = add.title = '空のクロッキーを追加'
-  add.onclick = async () => {
-    const { id } = await fetch('/api/croquis', { method: 'POST', body: '{}' }).then((r) => r.json())
-    hot.send('croquis:select', { id })
-    show(id)
-  }
-  $('#tabs').replaceChildren(
-    ...list.map((c) => {
-      const label = `${c.id}: ${c.title ?? ''}`
-      const b = document.createElement('button')
-      b.textContent = b.title = label
-      b.setAttribute('aria-pressed', String(c.id === current))
-      b.onclick = () => {
-        hot.send('croquis:select', { id: c.id })
-        show(c.id)
-      }
-      const x = document.createElement('button')
-      x.textContent = '×'
-      x.ariaLabel = x.title = `${label} を削除`
-      x.onclick = async () => {
-        if (!confirm(`「${label}」を削除しますか？\n図・赤ペン・フィードバックがすべて消えます。`)) return
-        await fetch('/api/croquis/' + c.id, { method: 'DELETE' })
-        queue = queue.filter((f) => f.croquis !== c.id)
-        renderQueue()
-        refresh()
-      }
-      const tab = document.createElement('span')
-      tab.className = 'tab'
-      tab.append(b, x)
-      return tab
-    }),
-    add,
-  )
-  return list
-}
-
-async function refresh() {
-  const list = await renderTabs()
-  const id = list.some((c) => c.id === current) ? current : list.at(-1)?.id
-  if (id != null) return show(id)
-  current = null
-  stage.replaceChildren()
-  syncButtons()
-}
-
-hot.on('croquis:changed', refresh)
-hot.on('croquis:active', ({ id }) => show(id))
+hot.on('croquis:changed', show)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return
+  unseen = false
+  retitle()
+})
 
 // ---- 色・線種・太さのドロップダウン ----
 
@@ -340,7 +314,7 @@ function renderQueue() {
     ...queue.map((f) => {
       const li = document.createElement('li')
       const text = document.createElement('span')
-      text.textContent = text.title = `#${f.croquis} ${f.comment || '（コメントなし）'}`
+      text.textContent = text.title = f.comment || '（コメントなし）'
       const x = document.createElement('button')
       x.type = 'button'
       x.textContent = '×'
@@ -403,12 +377,21 @@ $<HTMLFormElement>('#fb').onsubmit = async (e) => {
 }
 hot.on('croquis:saved', ({ ids }) => ($('#msg').textContent = `送信しました (${ids.length} 件)`))
 
-// ---- 状態の通知と初期表示 ----
+// ---- 初期表示と後片付け ----
 
-const vis = () => hot.send('croquis:visibility', { visible: document.visibilityState === 'visible' })
-document.addEventListener('visibilitychange', vis)
-vis()
-
-await show(Number(location.hash.slice(1)))
-if (current == null) await show((await api('active'))?.id)
-if (current == null) await refresh()
+if (ID == null) {
+  // # なしで開いたら、空のクロッキーを作って、そのタブにする（ユーザーが下絵を描いて送るとき）
+  const { id } = await fetch('/api/croquis', { method: 'POST', body: '{}' }).then((r) => r.json())
+  location.replace('#' + id)
+  location.reload()
+} else {
+  await show()
+  if (current != null) hot.send('croquis:view', { id: ID })
+}
+// # を書き換えたら、そのクロッキーのタブとして開き直す
+addEventListener('hashchange', () => location.reload())
+// タブを閉じたら、サーバーがこのクロッキーを消す。リロードでも送られるが、サーバーは猶予を置くので消えない。
+// メモリ節約でタブが破棄されたときは pagehide が起きないので、消えない
+addEventListener('pagehide', (e) => {
+  if (current != null && !e.persisted) navigator.sendBeacon(`/api/croquis/${ID}/close`)
+})

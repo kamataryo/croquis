@@ -3,6 +3,10 @@ import path from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
 
 const PORT = 5199
+// タブを閉じてから消すまでの猶予。リロードや、閉じたタブを開き直す（Cmd+Shift+T）のを待つ。CROQUIS_GRACE_MS はテスト用
+const GRACE = Number(process.env.CROQUIS_GRACE_MS ?? 60_000)
+// 閉じた合図が来なかったもの（一度も開かなかった、ブラウザが落ちた）は、最後に触ってからこれだけたったら消す
+const STALE = 24 * 60 * 60 * 1000
 
 function croquis(): Plugin {
   return {
@@ -11,7 +15,6 @@ function croquis(): Plugin {
       // CROQUIS_DIR はテスト用（test.mjs が一時ディレクトリを渡す）
       const DIR = process.env.CROQUIS_DIR ?? path.join(server.config.root, '.croquis')
       fs.mkdirSync(DIR, { recursive: true })
-      const stateFile = path.join(DIR, 'state.json')
       const dir = (id: unknown) => path.join(DIR, String(id))
       // id は数字だけを通す（パストラバーサル対策）
       const exists = (id: unknown) => /^\d+$/.test(String(id)) && fs.existsSync(dir(id))
@@ -19,24 +22,43 @@ function croquis(): Plugin {
       const readJson = (f: string, fallback: any) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return fallback } }
       const writeJson = (f: string, v: unknown) => fs.writeFileSync(f, JSON.stringify(v, null, 2))
       const ids = () => fs.readdirSync(DIR).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
-      const setActive = (id: number, changedBy: 'claude' | 'user') => {
-        const state = { id, changedBy, at: new Date().toISOString() }
-        writeJson(stateFile, state)
-        return state
+      const hasFeedback = (id: unknown) => fs.readdirSync(dir(id)).includes('feedback') && fs.readdirSync(path.join(dir(id), 'feedback')).length > 0
+
+      // ---- 後片付け ----
+      // 1 クロッキー = ブラウザの 1 タブ。タブを閉じたら、そのクロッキーを消す
+      const views = new Map<any, number>() // socket → そのタブが表示しているクロッキー
+      const viewed = (id: number) => [...views.values()].includes(id)
+      const closed = new Set<number>() // 閉じた合図が来て、まだ開き直されていないもの
+      const remove = (id: number) => {
+        fs.rmSync(dir(id), { recursive: true, force: true })
+        closed.delete(id)
       }
+      // 猶予のあと、開き直されておらず、未読のフィードバックもなければ消す。
+      // 未読があるうちは Claude がこれから直すので残し、既読になったときにもう一度ここへ来る
+      const reap = (id: number) =>
+        setTimeout(() => {
+          if (closed.has(id) && !viewed(id) && exists(id) && !hasFeedback(id)) remove(id)
+        }, GRACE).unref()
+      const sweep = () => {
+        for (const id of ids()) {
+          const files = [dir(id), ...fs.readdirSync(dir(id)).map((f) => path.join(dir(id), f))]
+          if (!viewed(id) && Date.now() - Math.max(...files.map((f) => fs.statSync(f).mtimeMs)) > STALE) remove(id)
+        }
+      }
+      // 起動の直後は、前から開いていたタブがまだつなぎ直していないので、少し待ってから
+      setTimeout(sweep, 60_000).unref()
+      setInterval(sweep, 60 * 60 * 1000).unref()
 
       let delivered = false // croquis wait にフィードバックを渡してから、既読になるまで（＝エージェントが処理している間）true
       let lastWait = 0 // croquis wait が最後に聞きに来た時刻。1 秒おきに来るので、途絶えたら待っていないとみなす
 
       // ---- ブラウザ → サーバー（Vite の ws custom event）----
-      const clients = new Map<any, boolean>() // socket → 表示中か
-      server.ws.on('croquis:visibility', ({ visible }, client) => {
+      server.ws.on('croquis:view', ({ id }, client) => {
+        if (!exists(id)) return
         const sock = (client as any).socket
-        if (!clients.has(sock)) sock.on('close', () => clients.delete(sock))
-        clients.set(sock, !!visible)
-      })
-      server.ws.on('croquis:select', ({ id }) => {
-        if (exists(id)) setActive(Number(id), 'user')
+        if (!views.has(sock)) sock.on('close', () => views.delete(sock))
+        views.set(sock, Number(id))
+        closed.delete(Number(id))
       })
       server.ws.on('croquis:sketch', ({ id, svg }) => {
         if (exists(id)) fs.writeFileSync(path.join(dir(id), 'sketch.svg'), String(svg))
@@ -90,19 +112,8 @@ function croquis(): Plugin {
           }
 
           if (seg[0] === 'status' && m === 'GET') {
-            const v = [...clients.values()]
-            return send(200, { open: v.length > 0, visible: v.some(Boolean), clients: v.length, waiting: !delivered && Date.now() - lastWait < 3000, processing: delivered })
-          }
-
-          if (seg[0] === 'active' && seg.length === 1) {
-            if (m === 'GET') return send(200, readJson(stateFile, { id: null }))
-            if (m === 'PUT') {
-              const { id } = await body()
-              if (!exists(id)) return send(404, { error: 'no such croquis' })
-              const state = setActive(Number(id), 'claude')
-              server.ws.send('croquis:active', { id: state.id })
-              return send(200, state)
-            }
+            const open = [...new Set(views.values())].sort((a, b) => a - b)
+            return send(200, { open, waiting: !delivered && Date.now() - lastWait < 3000, processing: delivered })
           }
 
           if (seg[0] === 'croquis' && seg.length === 1) {
@@ -137,9 +148,8 @@ function croquis(): Plugin {
                 return send(200, { id: Number(id) })
               }
               if (m === 'DELETE') {
-                fs.rmSync(dir(id), { recursive: true })
+                remove(Number(id))
                 delivered = false
-                if (readJson(stateFile, {}).id === Number(id)) fs.rmSync(stateFile)
                 return send(200, { id: Number(id) })
               }
             }
@@ -158,8 +168,16 @@ function croquis(): Plugin {
                 // 既読 = 削除。履歴が要るようになったら feedback/read/ へ移す形に変える
                 fs.rmSync(fdir, { recursive: true, force: true })
                 delivered = false
+                if (closed.has(Number(id))) reap(Number(id))
                 return send(200, { id: Number(id) })
               }
+            }
+
+            // タブが閉じられた（ブラウザが pagehide で sendBeacon する）。リロードでも来るので、猶予を置いてから消す
+            if (seg.length === 3 && seg[2] === 'close' && m === 'POST') {
+              closed.add(Number(id))
+              reap(Number(id))
+              return send(200, { id: Number(id) })
             }
           }
 
