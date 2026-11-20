@@ -11,9 +11,10 @@ const status = () => fetch(BASE + '/api/status').then((r) => r.json()).catch(() 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const [cmd, n = ''] = process.argv.slice(2)
-if (!['open', 'wait'].includes(cmd) || !/^\d*$/.test(n)) {
+if (!['open', 'start', 'wait'].includes(cmd) || !/^\d*$/.test(n)) {
   console.log(`usage:
-  croquis open [n]   ビューアを開く（Vite が動いていなければ起動する）
+  croquis open [n]   クロッキー n をブラウザのタブで開く（Vite が動いていなければ起動する）。n を省くと、空のクロッキーを作って開く
+  croquis start      Vite を起動するだけ（タブは開かない）
   croquis wait [n]   未読のフィードバックが届くまで待ち、届いたら JSON を出力して終了する（n を省くと全クロッキー）`)
   process.exit(cmd ? 1 : 0)
 }
@@ -27,7 +28,7 @@ if (cmd === 'wait') {
       const ids = n ? [n] : (await get('croquis')).map((c) => c.id)
       fbs = (await Promise.all(ids.map((id) => get(`croquis/${id}/feedback`)))).flat()
     } catch {
-      console.error('サーバーに繋がりません。croquis open で起動してください')
+      console.error('サーバーに繋がりません。croquis start で起動してください')
       process.exit(1)
     }
     // 存在しない n のときは {error} が返る。配列でなければ待ち続けても来ない
@@ -64,5 +65,7 @@ if (!s) {
   s = await status()
 }
 
-if (s.open) console.log('ビューアはすでに開いています')
+if (cmd === 'start') process.exit(0)
+// 1 クロッキー = 1 タブ。もう開いていれば、タブを増やさない（図の更新は、開いているタブに自動で出る）
+if (n && s.open.includes(Number(n))) console.log(`クロッキー ${n} のタブはすでに開いています`)
 else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [`${BASE}/#${n}`], { stdio: 'inherit' })

@@ -6,6 +6,8 @@ import path from 'node:path'
 import { createServer } from 'vite'
 
 process.env.CROQUIS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'croquis-'))
+process.env.CROQUIS_GRACE_MS = '200'
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const server = await createServer({ server: { port: 5198 }, logLevel: 'silent' })
 await server.listen()
 
@@ -27,11 +29,7 @@ try {
   await call('PUT', `croquis/${id}`, { title: '改題' })
   assert.deepEqual((await call('GET', 'croquis'))[1].map((c) => [c.id, c.title]), [[id, '改題']])
 
-  assert.equal((await call('PUT', 'active', { id }))[1].changedBy, 'claude')
-  assert.equal((await call('GET', 'active'))[1].id, id)
-  assert.equal((await call('PUT', 'active', { id: 999 }))[0], 404)
-
-  assert.deepEqual((await call('GET', 'status'))[1], { open: false, visible: false, clients: 0, waiting: false, processing: false })
+  assert.deepEqual((await call('GET', 'status'))[1], { open: [], waiting: false, processing: false })
   // croquis wait はヘッダーを付けて聞きに来る。それで「待っている」になる
   await call('GET', 'croquis', undefined, { 'X-Croquis-Wait': '1' })
   assert.equal((await call('GET', 'status'))[1].waiting, true)
@@ -50,9 +48,9 @@ try {
   await new Promise((ok, ng) => Object.assign(ws, { onopen: ok, onerror: ng }))
   const saved = new Promise((ok) => (ws.onmessage = (e) => JSON.parse(e.data).event === 'croquis:saved' && ok(JSON.parse(e.data).data)))
   const items = [{ croquis: id, comment: 'a', marks: [] }, { croquis: id, comment: 'b', marks: [] }, { croquis: 999, comment: 'x' }]
-  ws.send(JSON.stringify({ type: 'custom', event: 'croquis:feedback', data: { items } }))
+  const wsSend = (event, data) => ws.send(JSON.stringify({ type: 'custom', event, data }))
+  wsSend('croquis:feedback', { items })
   assert.equal((await saved).ids.length, 2)
-  ws.close()
   assert.deepEqual((await call('GET', `croquis/${id}/feedback`))[1].map((f) => f.comment), ['a', 'b'])
   // croquis wait が受け取ってから既読にするまでは「処理中」
   await call('GET', `croquis/${id}/feedback`, undefined, { 'X-Croquis-Wait': '1' })
@@ -66,9 +64,36 @@ try {
   const bad = await fetch('http://127.0.0.1:5198/api/croquis', { method: 'POST', body: '{' })
   assert.equal(bad.status, 400)
 
-  await call('DELETE', `croquis/${id}`)
-  assert.equal((await call('GET', `croquis/${id}`))[0], 404)
-  assert.equal((await call('GET', 'active'))[1].id, null)
+  // 後片付け：タブが閉じた合図のあと、猶予を過ぎたら消える
+  const alive = async (n) => (await call('GET', `croquis/${n}`))[0] === 200
+  const close = (n) => call('POST', `croquis/${n}/close`)
+  // タブが開いている間は「開いている」に出る
+  wsSend('croquis:view', { id })
+  await sleep(50)
+  assert.deepEqual((await call('GET', 'status'))[1].open, [id])
+  // リロード：合図は来るが、タブがつながっているので消えない
+  await close(id)
+  await sleep(400)
+  assert.ok(await alive(id))
+  // 閉じても、未読のフィードバックがあるうちは消えない。既読になってから消える
+  fs.mkdirSync(fdir)
+  fs.writeFileSync(path.join(fdir, 'fb-2.json'), '{}')
+  ws.close()
+  await sleep(50)
+  assert.deepEqual((await call('GET', 'status'))[1].open, [])
+  await close(id)
+  await sleep(400)
+  assert.ok(await alive(id))
+  await call('DELETE', `croquis/${id}/feedback`)
+  await sleep(400)
+  assert.ok(!(await alive(id)))
+  // 合図が来ていないもの（まだ開いていない）は消えない
+  const [, { id: id2 }] = await call('POST', 'croquis', {})
+  await sleep(400)
+  assert.ok(await alive(id2))
+
+  await call('DELETE', `croquis/${id2}`)
+  assert.equal((await call('GET', `croquis/${id2}`))[0], 404)
   console.log('ok')
 } finally {
   await server.close()
